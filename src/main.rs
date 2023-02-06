@@ -13,6 +13,10 @@ use rocket::http::Header;
 use rocket::{Request, Response};
 use rocket::fairing::{Fairing, Info, Kind};
 
+use rocket::http::ContentType;
+use rocket::http::Status;
+use rocket::http::Method;
+
 #[derive(Clone)]
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "rocket::serde")]
@@ -33,12 +37,37 @@ impl Fairing for CORS {
         }
     }
 
-    async fn on_response<'r>(&self, _request: &'r Request<'_>, response: &mut Response<'r>) {
+    async fn on_response<'r>(&self, request: &'r Request<'_>, response: &mut Response<'r>) {
         response.set_header(Header::new("Access-Control-Allow-Origin", "*"));
         response.set_header(Header::new("Access-Control-Allow-Methods", "POST, GET, PATCH, OPTIONS"));
         response.set_header(Header::new("Access-Control-Allow-Headers", "*"));
         response.set_header(Header::new("Access-Control-Allow-Credentials", "true"));
+
+        if request.method() == Method::Options {
+            let body = "";
+            response.set_header(ContentType::Plain);
+            response.set_sized_body(body.len(), std::io::Cursor::new(body));
+            response.set_status(Status::Ok);
+        }
     }
+}
+
+#[catch(default)]
+fn default(status: Status, req: &Request) -> String {
+    format!("{} ({})", status, req.uri())
+}
+
+#[catch(500)]
+fn internal_error() -> &'static str {
+    "Whoops! Looks like we messed up."
+}
+
+#[catch(404)]
+fn not_found(req: &Request<'_>) -> String {
+    if req.method() == Method::Options {
+        return "".to_string();
+    }
+    format!("Sorry, '{}' is not a valid path.", req.uri())
 }
 
 #[post("/post-json-data", format = "json", data = "<test_data>")]
@@ -77,5 +106,5 @@ fn get_data() -> std::io::Result<Option<String>> {
 
 #[launch]
 fn rocket() -> _ {
-    rocket::build().attach(CORS).mount("/", routes![get_data, post_data])
+    rocket::build().attach(CORS).mount("/", routes![get_data, post_data]).register("/", catchers![internal_error, not_found, default])
 }
